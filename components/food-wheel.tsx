@@ -4,19 +4,13 @@
 // Owns all state: filter selection, spin lifecycle, and winner.
 // Composes CategoryFilter + WheelCanvas + WinnerModal.
 
-import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import type { Category, Dish } from "@/lib/types";
 import { CATEGORY_LIST, CATEGORY_COLORS } from "@/lib/types";
 import { DISHES } from "@/data/dishes";
 import { CategoryFilter } from "@/components/category-filter";
 import { WheelCanvas } from "@/components/wheel-canvas";
 import { WinnerModal } from "@/components/winner-modal";
-
-// useLayoutEffect causes a warning during SSR. Use useEffect on the server
-// and useLayoutEffect on the client so the wheel size syncs before first paint
-// without triggering a hydration mismatch.
-const useIsomorphicLayoutEffect =
-  typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 // Truncate long dish names so they fit on narrow wheel slices.
 // Array.from iterates by Unicode code point, making this NFD/grapheme-safe
@@ -35,43 +29,17 @@ const DISH_COUNTS = CATEGORY_LIST.reduce(
   {} as Record<Category, number>
 );
 
-// Compute responsive wheel size based on viewport width.
-// Clamped between 280px (small phones) and 480px (desktop).
-function getWheelSize(): number {
-  if (typeof window === "undefined") return 380;
-  return Math.min(480, Math.max(280, window.innerWidth - 48));
-}
-
 export function FoodWheel(): React.ReactElement {
   // --- State ---
+  // Wheel sizing is CSS-driven (aspect-square + max-w on container, SVG viewBox
+  // handles the rest). No JS resize listener needed — eliminates SSR mismatch
+  // and the 380→viewport flash that broke mobile rendering.
   const [selected, setSelected] = useState<Set<Category>>(
     () => new Set(CATEGORY_LIST) // all categories on by default
   );
   const [mustSpin, setMustSpin] = useState(false);
   const [prizeNumber, setPrizeNumber] = useState(0);
   const [winner, setWinner] = useState<Dish | null>(null);
-  // Responsive wheel size: updated on mount + window resize (debounced 200ms).
-  // Server renders with default 380; client corrects synchronously before paint
-  // via useIsomorphicLayoutEffect, avoiding a visible flash of wrong size.
-  const [wheelSize, setWheelSize] = useState<number>(380);
-
-  useIsomorphicLayoutEffect(() => {
-    setWheelSize(getWheelSize());
-  }, []);
-
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>;
-    function handleResize(): void {
-      clearTimeout(timer);
-      timer = setTimeout(() => setWheelSize(getWheelSize()), 200);
-    }
-
-    window.addEventListener("resize", handleResize);
-    return () => {
-      window.removeEventListener("resize", handleResize);
-      clearTimeout(timer);
-    };
-  }, []);
 
   // --- Derived data ---
 
@@ -151,14 +119,13 @@ export function FoodWheel(): React.ReactElement {
 
       {/* Wheel or placeholder when too few dishes are selected */}
       {filtered.length >= 2 ? (
-        <div className="w-full max-w-[480px]">
+        <div className="w-full max-w-[420px] aspect-square px-2">
           <WheelCanvas
             key={wheelKey}
             data={wheelData}
             prizeNumber={safePrizeNumber}
             mustStartSpinning={mustSpin}
             onStopSpinning={handleStop}
-            size={wheelSize}
           />
         </div>
       ) : (
